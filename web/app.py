@@ -1,3 +1,4 @@
+from pathlib import Path
 import os
 import base64
 import requests
@@ -8,10 +9,35 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
+
+# Load environment variables
 load_dotenv()
 
+
+# --------------------------------------------------
+# App Configuration
+# --------------------------------------------------
+
 app = FastAPI(title="Zenvy Voice Lab")
-app.mount("/static", StaticFiles(directory="static"), name="static")
+
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
+
+
+# --------------------------------------------------
+# Static Files
+# --------------------------------------------------
+
+app.mount(
+    "/static",
+    StaticFiles(directory=STATIC_DIR),
+    name="static"
+)
+
+
+# --------------------------------------------------
+# CORS
+# --------------------------------------------------
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,13 +46,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# --------------------------------------------------
+# Sarvam API
+# --------------------------------------------------
+
 API_KEY = os.getenv("SARVAM_API_KEY")
 
 
+# --------------------------------------------------
+# Home Page
+# --------------------------------------------------
+
 @app.get("/")
 def home():
-    return FileResponse("static/index.html")
+    return FileResponse(
+        STATIC_DIR / "index.html"
+    )
 
+
+# --------------------------------------------------
+# Speech-to-Text
+# --------------------------------------------------
 
 @app.post("/api/stt")
 async def speech_to_text(
@@ -34,7 +75,9 @@ async def speech_to_text(
     language_code: str = Form("unknown")
 ):
     if not API_KEY:
-        return {"error": "SARVAM_API_KEY not configured"}
+        return {
+            "error": "SARVAM_API_KEY not configured"
+        }
 
     audio = await file.read()
 
@@ -55,21 +98,33 @@ async def speech_to_text(
         "api-subscription-key": API_KEY
     }
 
-    response = requests.post(
-        "https://api.sarvam.ai/speech-to-text",
-        headers=headers,
-        files=files,
-        data=data
-    )
+    try:
+        response = requests.post(
+            "https://api.sarvam.ai/speech-to-text",
+            headers=headers,
+            files=files,
+            data=data,
+            timeout=60
+        )
 
-    if response.status_code != 200:
+        if response.status_code != 200:
+            return {
+                "error": "STT failed",
+                "details": response.text
+            }
+
+        return response.json()
+
+    except requests.RequestException as e:
         return {
-            "error": "STT failed",
-            "details": response.text
+            "error": "STT request failed",
+            "details": str(e)
         }
 
-    return response.json()
 
+# --------------------------------------------------
+# Text-to-Speech
+# --------------------------------------------------
 
 @app.post("/api/tts")
 async def text_to_speech(
@@ -78,7 +133,9 @@ async def text_to_speech(
     speaker: str = Form("shubh")
 ):
     if not API_KEY:
-        return {"error": "SARVAM_API_KEY not configured"}
+        return {
+            "error": "SARVAM_API_KEY not configured"
+        }
 
     data = {
         "text": text,
@@ -92,20 +149,28 @@ async def text_to_speech(
         "Content-Type": "application/json"
     }
 
-    response = requests.post(
-        "https://api.sarvam.ai/text-to-speech",
-        headers=headers,
-        json=data
-    )
+    try:
+        response = requests.post(
+            "https://api.sarvam.ai/text-to-speech",
+            headers=headers,
+            json=data,
+            timeout=60
+        )
 
-    if response.status_code != 200:
+        if response.status_code != 200:
+            return {
+                "error": "TTS failed",
+                "details": response.text
+            }
+
+        result = response.json()
+
         return {
-            "error": "TTS failed",
-            "details": response.text
+            "audio": result["audios"][0]
         }
 
-    result = response.json()
-
-    return {
-        "audio": result["audios"][0]
-    }
+    except requests.RequestException as e:
+        return {
+            "error": "TTS request failed",
+            "details": str(e)
+        }
